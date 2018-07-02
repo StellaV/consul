@@ -1,81 +1,106 @@
-- name: Create consul user
-  user:
-    name: consul
-    state: present
+################# Installation ############################
+- block:
+  - name: Create consul user
+    user:
+      name: consul
+      state: present
 
-- name: Create consul directories
-  file:
-    path: "{{ item }}"
-    state: directory
-    mode: 0755
-    owner: consul
-    group: consul
-  with_items:
-  - dirs
+  - name: Create consul directories
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: 0755
+      owner: consul
+      group: consul
+    with_items: "{{ dirs }}"
 
-- name: Download consul
-  get_url: 
-    url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
-    dest: /var/tmp/consul.zip
-    mode: 0744
-    use_proxy: yes
-  environment:
-    https_proxy: <proxy>
+  - name: Download consul
+    get_url: 
+      url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
+      dest: /var/tmp/consul.zip
+      mode: 0744
+      use_proxy: yes
 
-- name: Extract consul binary
-  unarchive:
-    src: /var/tmp/consul.zip
-    dest: /usr/sbin
-    remote_src: yes
-    owner: consul
-    mode: 0744
+  - name: Extract consul binary
+    unarchive:
+      src: /var/tmp/consul.zip
+      dest: /usr/sbin
+      remote_src: yes
+      owner: consul
+      mode: 0744
 
-- name: Check if this is a consul server
-  set_fact: server_mode="true"
+  - name: Check if this is a consul server
+    set_fact: server_mode="true"
+    when: inventory_hostname in groups["consul_servers"]
+
+  #- name: Check if this is a consul server
+  #  set_fact: server_mode="false"
+  #  when: inventory_hostname in groups["consul_clients"]
+  tags:
+    - always
+################# Bootstrap server ############################
+## Bootstrap server needs to be started once and cleared. Later in the playbook the config file will be changed to make it a regular server
+#
+- block:
+  - name: Elect bootstrap server
+    set_fact: bootstrap_server="{{ inventory_hostname }}"
+    run_once: true
+
+  - name: Check if this is a consul server
+    set_fact: bootstrap="true"
+    when: inventory_hostname == bootstrap_server
+
+  - name: Add bootstrap config if bootstrap server
+    template:
+      src: bootstrap-config.json
+      dest: /etc/consul.d/config.json
+    when: inventory_hostname == bootstrap_server
+    run_once: true
+    notify: Remove bootstrap
+
+  - name: Reset bootstrap to false for the rest of the servers
+    set_fact: bootstrap="false"
+    when: inventory_hostname == bootstrap_server
+
+  - name: Start service on bootstrap server
+    include_tasks: service.yml
+    when: inventory_hostname == bootstrap_server
+
   when: inventory_hostname in groups["consul_servers"]
+  tags:
+    - bootstrap
 
-- name: Get the IP address(es) of cluster servers
-  set_fact:
-    cluster_ips_list: "{{ groups.consul_servers | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
+################# Config files ############################
+- block:
+  - name: Get the IP address(es) of cluster servers
+    set_fact:
+      cluster_ips_list: "{{ groups.consul_servers | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
   
-- name: Exclude current server from cluster server IPs
-  set_fact:
-    cluster_ips_list: "{{ cluster_ips_list | reject('search', ansible_default_ipv4.address) | list }}"
-  when: inventory_hostname in groups["consul_servers"]
+  - name: Exclude current server from cluster server IPs
+    set_fact:
+      cluster_ips_list: "{{ cluster_ips_list | reject('search', ansible_default_ipv4.address) | list }}"
+    when: inventory_hostname in groups["consul_servers"]
 
-- name: Cluster IPs string
-  set_fact:
-    cluster_ips: "{{ cluster_ips | join('\", \"') }}"
+  - name: Cluster IPs string
+    set_fact:
+      cluster_ips: "{{ cluster_ips_list | join('\", \"') }}"
 
-- name: Add bootstrap config if bootstrap server
-  template:
-    src: bootstrap-config.json
-    dest: /etc/consul.d/config.json
-  when: inventory_hostname in groups["consul_servers"]
+  - name: Add server config to servers
+    template:
+      src: server-config.json
+      dest: /etc/consul.d/config.json
+    when: inventory_hostname in groups["consul_servers"]
 
-- name: Add server config to servers
-  template:
-    src: server-config.json
-    dest: /etc/consul.d/config.json
-  when: inventory_hostname in groups["consul_servers"]
+ # - name: Add client config to clients
+ #   template:
+ #     src: client-config.json
+ #     dest: /etc/consul.d/config.json
+ #   when: inventory_hostname in groups["consul_clients"]
 
-- name: Add client config to clients
-  template:
-    src: client-config.json
-    dest: /etc/consul.d/config.json
-  when: inventory_hostname in groups["consul_clients"]
-
-- name: Add service file
-  copy:
-    src: consul.service
-    dest: /etc/systemd/system/consul.service
-
-- name: Reload systemd daemon
-  systemd:
-    daemon_reload: yes
-
-- name: Start and enable consul service
-  service:
-    name: consul
-    enabled: yes
-    state: started
+  - name: Add consul service
+    include_tasks: service.yml
+#    vars:
+#      cluster_ips: "{{ cluster_ips }}"
+  when: inventory_hostname != bootstrap_server
+  tags:
+    - always

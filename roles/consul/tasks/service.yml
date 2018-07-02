@@ -1,0 +1,15 @@
+################# Service consul ############################
+- name: Add service file
+  copy:
+    src: consul.service
+    dest: /etc/systemd/system/consul.service
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Start and enable consul service
+  service:
+    name: consul
+    enabled: yes
+    state: started

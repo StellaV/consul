@@ -1,2 +1,11 @@
----
-# handlers file for consul
+################# Remove bootstrap ############################
+- name: Remove bootstrap
+  template:
+    src: server-config.json
+    dest: /etc/consul.d/config.json
+  notify: Restart consul
+
+- name: Restart consul
+  service:
+    name: consul
+    state: restarted
