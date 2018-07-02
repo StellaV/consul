@@ -20,7 +20,7 @@
     mode: 0744
     use_proxy: yes
   environment:
-    https_proxy: http://packer.paas.intranet:3128
+    https_proxy: <proxy>
 
 - name: Extract consul binary
   unarchive:
