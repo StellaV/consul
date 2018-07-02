@@ -1,0 +1,8 @@
+{
+  "bootstrap": true,
+  "server": true,
+  "data_dir": "{{ data_dir }}",
+  "log_level": "{{ log_level }}",
+  "bind_addr": "{{ ansible_default_ipv4.address }}",
+  "encrypt": "{{ encrypt }}"
+}

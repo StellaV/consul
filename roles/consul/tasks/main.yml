@@ -1,0 +1,81 @@
+- name: Create consul user
+  user:
+    name: consul
+    state: present
+
+- name: Create consul directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+    owner: consul
+    group: consul
+  with_items:
+  - dirs
+
+- name: Download consul
+  get_url: 
+    url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
+    dest: /var/tmp/consul.zip
+    mode: 0744
+    use_proxy: yes
+  environment:
+    https_proxy: http://packer.paas.intranet:3128
+
+- name: Extract consul binary
+  unarchive:
+    src: /var/tmp/consul.zip
+    dest: /usr/sbin
+    remote_src: yes
+    owner: consul
+    mode: 0744
+
+- name: Check if this is a consul server
+  set_fact: server_mode="true"
+  when: inventory_hostname in groups["consul_servers"]
+
+- name: Get the IP address(es) of cluster servers
+  set_fact:
+    cluster_ips_list: "{{ groups.consul_servers | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
+  
+- name: Exclude current server from cluster server IPs
+  set_fact:
+    cluster_ips_list: "{{ cluster_ips_list | reject('search', ansible_default_ipv4.address) | list }}"
+  when: inventory_hostname in groups["consul_servers"]
+
+- name: Cluster IPs string
+  set_fact:
+    cluster_ips: "{{ cluster_ips | join('\", \"') }}"
+
+- name: Add bootstrap config if bootstrap server
+  template:
+    src: bootstrap-config.json
+    dest: /etc/consul.d/config.json
+  when: inventory_hostname in groups["consul_servers"]
+
+- name: Add server config to servers
+  template:
+    src: server-config.json
+    dest: /etc/consul.d/config.json
+  when: inventory_hostname in groups["consul_servers"]
+
+- name: Add client config to clients
+  template:
+    src: client-config.json
+    dest: /etc/consul.d/config.json
+  when: inventory_hostname in groups["consul_clients"]
+
+- name: Add service file
+  copy:
+    src: consul.service
+    dest: /etc/systemd/system/consul.service
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Start and enable consul service
+  service:
+    name: consul
+    enabled: yes
+    state: started

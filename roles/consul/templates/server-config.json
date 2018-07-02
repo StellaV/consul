@@ -1,0 +1,12 @@
+{
+  "bootstrap": false,
+  "server": true,
+  "data_dir": "{{ data_dir }}",
+  "log_level": "{{ log_level }}",
+  "bind_addr": "{{ ansible_default_ipv4.address }}",
+  "encrypt": "{{ encrypt }}",
+  "ui": true,
+  "client_addr": "{{ ansible_default_ipv4.address }}",
+  "start_join": ["{{ cluster_ips }}"],
+  "enable_script_checks": true
+}
