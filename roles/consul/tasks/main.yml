@@ -19,7 +19,6 @@
       url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
       dest: /var/tmp/consul.zip
       mode: 0744
-      use_proxy: yes
 
   - name: Extract consul binary
     unarchive:
@@ -36,8 +35,29 @@
   #- name: Check if this is a consul server
   #  set_fact: server_mode="false"
   #  when: inventory_hostname in groups["consul_clients"]
+
+
   tags:
     - always
+
+################# Initiate some variables ############################
+- block:
+  - name: Get the IP address(es) of cluster servers
+    set_fact:
+      cluster_ips_list: "{{ groups.consul_servers | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
+
+  - name: Exclude current server from cluster server IPs
+    set_fact:
+      cluster_ips_list: "{{ cluster_ips_list | reject('search', ansible_default_ipv4.address) | list }}"
+    when: inventory_hostname in groups["consul_servers"]
+
+  - name: Cluster IPs string
+    set_fact:
+      cluster_ips: "{{ cluster_ips_list | join('\", \"') }}"
+
+  tags:
+    - always
+
 ################# Bootstrap server ############################
 ## Bootstrap server needs to be started once and cleared. Later in the playbook the config file will be changed to make it a regular server
 #
@@ -72,19 +92,6 @@
 
 ################# Config files ############################
 - block:
-  - name: Get the IP address(es) of cluster servers
-    set_fact:
-      cluster_ips_list: "{{ groups.consul_servers | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
-  
-  - name: Exclude current server from cluster server IPs
-    set_fact:
-      cluster_ips_list: "{{ cluster_ips_list | reject('search', ansible_default_ipv4.address) | list }}"
-    when: inventory_hostname in groups["consul_servers"]
-
-  - name: Cluster IPs string
-    set_fact:
-      cluster_ips: "{{ cluster_ips_list | join('\", \"') }}"
-
   - name: Add server config to servers
     template:
       src: server-config.json
@@ -97,10 +104,13 @@
  #     dest: /etc/consul.d/config.json
  #   when: inventory_hostname in groups["consul_clients"]
 
+  - debug: var=cluster_ips
+
   - name: Add consul service
     include_tasks: service.yml
-#    vars:
-#      cluster_ips: "{{ cluster_ips }}"
+    vars:
+      cluster_ips: cluster_ips
+
   when: inventory_hostname != bootstrap_server
   tags:
     - always
